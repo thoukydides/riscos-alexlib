@@ -1,0 +1,335 @@
+;   File        : Hdr.macros
+;   Date        : 19-Sep-02
+;   Author      : © A.Thoukydides, 1995-2002, 2016
+;   Description : Useful ObjAsm assembler macros.
+;
+;   License     : AlexLib is free software: you can redistribute it and/or
+;                 modify it under the terms of the GNU General Public License
+;                 as published by the Free Software Foundation, either
+;                 version 3 of the License, or (at your option) any later
+;                 version.
+;
+;                 AlexLib is distributed in the hope that it will be useful,
+;                 but WITHOUT ANY WARRANTY; without even the implied warranty
+;                 of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+;                 the GNU General Public License for more details.
+;
+;                 You should have received a copy of the GNU General Public
+;                 License along with AlexLib. If not, see
+;                 <http://www.gnu.org/licenses/>.
+
+        [       :LNOT::DEF:Hdr_macros
+        GBLL    Hdr_macros
+
+; Declaration and initialisation of global variables
+
+        ;   Syntax      : [<label>] DefA <value>
+        ;   Parameters  : label - Name of the variable.
+        ;                 value - The arithmetic value to assign.
+        ;   Description : Declare and initialise a global arithmetic variable.
+        MACRO
+$label  DefA    $value
+        GBLA    $label                  ; Declare a global arithmetic variable
+$label  SETA    $value                  ; Assign the specified value
+        MEND
+
+        ;   Syntax      : [<label>] DefL <value>
+        ;   Parameters  : label - Name of the variable.
+        ;                 value - The logical value to assign.
+        ;   Description : Declare and initialise a global logical variable.
+        MACRO
+$label  DefL    $value
+        GBLL    $label                  ; Declare a global logical variable
+$label  SETL    $value                  ; Assign the specified value
+        MEND
+
+        ;   Syntax      : [<label>] DefS <value>
+        ;   Parameters  : label - Name of the variable.
+        ;                 value - The string value to assign.
+        ;   Description : Declare and initialise a global string variable.
+        MACRO
+$label  DefS    $value
+        GBLS    $label                  ; Declare a global string variable
+$label  SETS    "$value"                ; Assign the specified value
+        MEND
+
+        ;   Syntax      : [<label>] DefE <value>
+        ;   Parameters  : label - Name of the variable.
+        ;                 value - The string expression to assign.
+        ;   Description : Declare and initialise a global string variable.
+        ;                 The difference between this and DefS is that the
+        ;                 <value> parameter is not quoted, so the expression
+        ;                 can be evaluated.
+        MACRO
+$label  DefE    $value
+        GBLS    $label                  ; Declare a global string variable
+$label  SETS    $value                  ; Assign the specified value
+        MEND
+
+; Local named labels
+
+        ; Global variables used to manage local labels
+LocalC  DefA    1                       ; Current local label number
+LocalN  DefA    LocalC + 1              ; Next local label number to use
+LocalL  DefA    1                       ; Level of local label macro nestings
+l       DefS    "Local$LocalC"          ; Current local label suffix string
+
+        ;   Syntax      : [<label>] LocalLabels
+        ;   Parameters  : label - An optional program label.
+        ;   Description : Declare the start of a new region of local labels.
+        ;                 This allows labels like <label>$l to be used.
+        MACRO
+$label  LocalLabels
+$label
+LocalC  SETA    LocalN                  ; Obtain a new local label
+l       SETS    "Local$LocalC"          ; Set the label suffix string
+LocalN  SETA    LocalN + 1              ; Increment next free label
+        MEND
+
+        ;   Syntax      : [<label>] MacroLabels
+        ;   Parameters  : label - An optional program label.
+        ;   Description : Declare the start of a new region of local labels
+        ;                 within a macro. This should be paired with
+        ;                 MacroLabelsEnd.
+        MACRO
+$label  MacroLabels
+$label
+MacroLabel$LocalL\
+        DefA    LocalC                  ; Remember current level label number
+LocalL  SETA    LocalL + 1              ; Increment nesting count
+        LocalLabels                     ; Produce a new label for this level
+        MEND
+
+        ;   Syntax      : [<label>] MacroLabelsEnd
+        ;   Parameters  : label - An optional program label.
+        ;   Description : Declare the end of a region of local labels started
+        ;                 using MacroLabels.
+        MACRO
+$label  MacroLabelsEnd
+$label
+LocalL  SETA    LocalL - 1              ; Decrement nesting count
+LocalC  SETA    MacroLabel$LocalL       ; Restore previous label number
+l       SETS    "Local$LocalC"          ; Restore previous label string
+        MEND
+
+; Automatic subroutine register stacking
+
+        ; Global variable used to manage stacked subroutine registers
+        GBLS    StackedRegs             ; Currently stacked registers
+
+        ;   Syntax      : [<label>] JSR [<regs>]
+        ;   Parameters  : label - An optional program label.
+        ;                 regs  - A list of registers to stack in the same
+        ;                         format as used for LDM/STM, but witout the
+        ;                         braces. Note that if this includes commas
+        ;                         or spaces then it must be quoted.
+        ;   Returns     : The start of a subroutine. If a list of registers is
+        ;                 specified then they are stored on the stack, and
+        ;                 pulled on an RTS. The link register is always
+        ;                 stored, and should not be specified.
+        MACRO
+$label  JSR     $regs
+StackedRegs\
+        SETS    "$regs"
+$label
+        [   StackedRegs = ""            ; Were any extra registers specified
+        STMFD   r13!, {r14}             ; Just store link register
+        |
+        STMFD   r13!, {$StackedRegs, r14}; Store specified registers and link
+        ]
+        MEND
+
+        ;   Syntax      : [<label>] PULL [<cc>]
+        ;   Parameters  : label - An optional program label.
+        ;                 cc    - Optional condition code.
+        ;   Returns     : Restore any stacked registers, including the link
+        ;                 register.
+        MACRO
+$label  PULL    $cc
+$label
+        [       StackedRegs = ""        ; Were extra registers stacked
+        LDM$cc.FD r13!, {r14}           ; Just pull the link register
+        |
+        LDM$cc.FD r13!, {$StackedRegs, r14}; Pull all stacked registers
+        ]
+        MEND
+
+        ;   Syntax      : [<label>] RTS [<cc>]
+        ;   Parameters  : label - An optional program label.
+        ;                 cc    - Optional condition code.
+        ;   Returns     : The end of a subroutine. Any stacked registers are
+        ;                 restored, but the flags are maintained.
+        MACRO
+$label  RTS     $cc
+$label
+        [       StackedRegs = ""        ; Were extra registers stacked
+        LDM$cc.FD r13!, {pc}            ; Just pull the program counter
+        |
+        LDM$cc.FD r13!, {$StackedRegs, pc}; Pull all stacked registers
+        ]
+        MEND
+
+        ;   Syntax      : [<label>] RTSS [<cc>]
+        ;   Parameters  : label - An optional program label.
+        ;                 cc    - Optional condition code.
+        ;   Returns     : The end of a subroutine. Any stacked registers,
+        ;                 including flags, are restored.
+        MACRO
+$label  RTSS    $cc
+$label
+        [       StackedRegs = ""        ; Were extra registers stacked
+        LDM$cc.FD r13!, {pc}^           ; Just pull program counter and flags
+        |
+        LDM$cc.FD r13!, {$StackedRegs, pc}^; Pull all registers and flags
+        ]
+        MEND
+
+        ;   Syntax      : [<label>] RTE [<cc>]
+        ;   Parameters  : label - An optional program label.
+        ;                 cc    - Optional condition code.
+        ;   Returns     : The end of a subroutine. Any stacked registers
+        ;                 (except r0) are restored, but the flags are
+        ;                 maintained. This should be used if an error may
+        ;                 be returned.
+        MACRO
+$label  RTE     $cc
+        LCLS    sregs
+sregs   SETS    StackedRegs :CC: "     "
+        LCLA    slen
+slen    SETA    :LEN:StackedRegs
+$label
+        [       2 <= slen  :LAND: sregs:LEFT:2 = "r0"
+        ADD$cc  r13, r13, #4            ; Skip r0 on the stack
+        [       5 <= slen  :LAND: sregs:LEFT:5 = "r0-r1" :LAND: (sregs:LEFT:6 < "r0-r10" :LOR: sregs:LEFT:6 > "r0-r15")                     ; If "r0-r1..."
+sregs   SETS    StackedRegs :RIGHT: (slen - 3)              ; then "r1..."
+        |
+        [       3 <= slen  :LAND: sregs:LEFT:3 = "r0-"      ; elsif "r0-..."
+sregs   SETS    "r1" :CC: (StackedRegs :RIGHT: (slen - 2))  ; then "r1-..."
+        |
+        [       3 <= slen  :LAND: sregs:LEFT:3 = "r0,"      ; elsif "r0,..."
+sregs   SETS    StackedRegs :RIGHT: (slen - 3)              ; then "..."
+        |
+sregs   SETS    ""                                          ; else ""
+        ]
+        ]
+        ]
+        |
+sregs   SETS    StackedRegs             ; r0 not used, so pull all registers
+        ]
+        [       sregs = ""              ; Were extra registers stacked
+        LDM$cc.FD r13!, {pc}            ; Just pull program counter
+        |
+        LDM$cc.FD r13!, {$sregs, pc}    ; Pull all stacked registers
+        ]
+        MEND
+
+; Loading a word from an unknown alignment
+
+        ;   Syntax      : [<label>] LDRU <rd>, <rn>, <rt1>, <rt2>
+        ;   Parameters  : label     - An optional program label.
+        ;                 rd        - The destination register.
+        ;                 rn        - The address to load from.
+        ;                 rt1, rt2  - Two temporary registers (that get
+        ;                             corrupted).
+        ;   Description : Load a word from an unknown alignment.
+        MACRO
+$label  LDRU    $rd, $ra, $rt1, $rt2
+        ASSERT  $rd <> $ra              ; Produce an error if the registers
+        ASSERT  $rd <> $rt1             ; are not all different
+        ASSERT  $rd <> $rt2
+        ASSERT  $ra <> $rt1
+        ASSERT  $ra <> $rt2
+        ASSERT  $rt1 <> $rt2
+        LCLS    rb                      ; The two temporary registers
+        LCLS    rc
+        [       $rt1 < $rt2             ; Ensure that rb < rc
+rb      SETS    "$rt1"
+rc      SETS    "$rt2"
+        |
+rb      SETS    "$rt2"
+rc      SETS    "$rt1"
+        ]
+$label  BIC     $rb, $ra, #3            ; Get word-aligned address
+        LDMIA   $rb, {$rd, $rc}         ; Get 64 bits containing answer
+        AND     $rb, $ra, #3            ; Correction factor in bytes
+        MOVS    $rb, $rb, LSL#3         ; and in bits, so check if aligned
+        MOVNE   $rd, $rd, LSR $rb       ; If not, produce bottom bits of result
+        RSBNE   $rb, $rb, #32           ; Get other shift amount
+        ORRNE   $rd, $rd, $rc, LSL $rb  ; Combine two halves for result
+        MEND
+
+; Long versions of standard instructions
+
+        ;   Syntax      : [<label>] ADDL <rd>, <rn>, <exp>
+        ;   Parameters  : label - An optional program label.
+        ;                 rd    - The destination register.
+        ;                 rn    - A register for the first operand (may be rd).
+        ;                 exp   - A (word aligned) constant expression to add.
+        ;   Description : A version of ADD (implemented using two instructions)
+        ;                 that allows larger immediate constants to be used.
+        MACRO
+$label  ADDL    $rd, $rn, $exp
+$label  ADD     $rd, $rn, #($exp:AND:&000003FF)
+        ADD     $rd, $rd, #($exp:AND:&FFFFFC00)
+        MEND
+
+; String handling
+
+        ;   Syntax      : [<label>] Lower <rd>
+        ;   Parameters  : label - An optional program label.
+        ;                 rd    - The register containing the character to
+        ;                         be converted to lower case.
+        ;   Description : Convert a character to lower case.
+        MACRO
+$label  Lower   $rd
+$label  MacroLabels
+        CMP     $rd, #'A'               ; Is it as least an 'A'
+        BLT     done$l                  ; Skip if not
+        CMP     $rd, #'Z'               ; Is it at most a 'Z'
+        SUBLE   $rd, $rd, #'A' - 'a'    ; Convert to lower case if it is
+done$l  MacroLabelsEnd
+        MEND
+
+        ;   Syntax      : [<label>] Upper <rd>
+        ;   Parameters  : label - An optional program label.
+        ;                 rd    - The register containing the character to
+        ;                         be converted to upper case.
+        ;   Description : Convert a character to upper case.
+        MACRO
+$label  Upper   $rd
+$label  MacroLabels
+        CMP     $rd, #'a'               ; Is it as least an 'A'
+        BLT     done$l                  ; Skip if not
+        CMP     $rd, #'z'               ; Is it at most a 'Z'
+        ADDLE   $rd, $rd, #'A' - 'a'    ; Convert to upper case if it is
+done$l  MacroLabelsEnd
+        MEND
+
+        ;   Syntax      : [<label>] CopyStr <rd>, <rn>, <rt>
+        ;   Parameters  : label - An optional program label.
+        ;                 rd    - Register pointing to destination string.
+        ;                 rn    - Register pointing to source string.
+        ;                 rt    - A temporary register.
+        ;   Description : The specified string is copied to, and including,
+        ;                 a control character terminator. Both registers are
+        ;                 left pointing to the terminator. All three registers
+        ;                 should be different.
+        MACRO
+$label  CopyStr $rd, $rn, $rt
+        ASSERT  $rd <> $rn
+        ASSERT  $rd <> $rt
+        ASSERT  $rn <> $rt
+$label  MacroLabels
+loop$l  LDRB    $rt, [$rn], #1          ; Read a character of the source string
+        STRB    $rt, [$rd], #1          ; Write the character to destination
+        CMP     $rt, #31                ; Is it a control character terminator
+        BGE     loop$l                  ; No, so loop round to next character
+        SUB     $rd, $rd, #1            ; Move pointer back to terminator
+        SUB     $rn, $rn, #1            ; for both source and destination
+        MacroLabelsEnd
+        MEND
+
+; End of macro definitions
+
+        ]
+        END
